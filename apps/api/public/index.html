@@ -26,10 +26,6 @@
       padding: 40px 0;
     }
 
-    .header {
-      margin-bottom: 24px;
-    }
-
     h1 {
       margin: 0 0 8px;
       font-size: 42px;
@@ -38,13 +34,14 @@
     .status {
       color: #9ca3af;
       font-size: 18px;
+      margin-bottom: 6px;
     }
 
     .session {
-      margin-top: 8px;
       color: #6b7280;
       font-size: 13px;
       word-break: break-all;
+      margin-bottom: 24px;
     }
 
     .chat {
@@ -53,8 +50,8 @@
       padding: 20px;
       min-height: 450px;
       max-height: 600px;
-      margin-bottom: 20px;
       overflow-y: auto;
+      margin-bottom: 20px;
     }
 
     .message {
@@ -71,6 +68,11 @@
 
     .assistant {
       background: #2563eb;
+    }
+
+    .interim {
+      opacity: 0.65;
+      font-style: italic;
     }
 
     .controls {
@@ -118,36 +120,23 @@
 <body>
   <div class="container">
 
-    <div class="header">
-      <h1>🎙️ VoxAgent AI</h1>
+    <h1>🎙️ VoxAgent AI</h1>
 
-      <div class="status" id="status">
-        Initializing...
-      </div>
+    <div class="status" id="status">
+      Initializing...
+    </div>
 
-      <div class="session" id="sessionInfo">
-        Session: creating...
-      </div>
+    <div class="session" id="sessionInfo">
+      Session: creating...
     </div>
 
     <div class="chat" id="chat"></div>
 
     <div class="controls">
-      <button id="talkBtn">
-        🎤 Talk
-      </button>
-
-      <button id="stopBtn" disabled>
-        ⏹ Stop
-      </button>
-
-      <button id="clearBtn">
-        🗑 Clear
-      </button>
-
-      <button id="newSessionBtn">
-        🔄 New Session
-      </button>
+      <button id="talkBtn">🎤 Talk</button>
+      <button id="stopBtn" disabled>⏹ Stop</button>
+      <button id="clearBtn">🗑 Clear</button>
+      <button id="newSessionBtn">🔄 New Session</button>
     </div>
 
   </div>
@@ -169,30 +158,53 @@
     let recognition = null;
     let conversationId = null;
 
-    function addMessage(role, text) {
+    // Full user turn accumulated from recognition.
+    let transcriptBuffer = "";
+
+    // Last interim transcript shown in UI.
+    let interimText = "";
+
+    // Timer used to detect that the user has stopped speaking.
+    let silenceTimer = null;
+
+    // Do not process the same turn twice.
+    let turnProcessing = false;
+
+    // ~1.2 seconds of silence = end of turn.
+    const SILENCE_DELAY = 1200;
+
+    function addMessage(role, text, extraClass = "") {
       const div = document.createElement("div");
 
-      div.className = `message ${role}`;
-
+      div.className = `message ${role} ${extraClass}`.trim();
       div.textContent =
         `${role === "user" ? "You" : "VoxAgent"}: ${text}`;
 
       chat.appendChild(div);
       chat.scrollTop = chat.scrollHeight;
+
+      return div;
+    }
+
+    function stopSpeaking() {
+      if ("speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+
+      if (status.textContent === "🔊 VoxAgent is speaking...") {
+        status.textContent = "Ready";
+      }
     }
 
     function speak(text) {
       if (!("speechSynthesis" in window)) {
-        console.warn(
-          "Speech synthesis is not supported."
-        );
+        console.warn("Speech synthesis is not supported.");
         return;
       }
 
-      window.speechSynthesis.cancel();
+      stopSpeaking();
 
-      const utterance =
-        new SpeechSynthesisUtterance(text);
+      const utterance = new SpeechSynthesisUtterance(text);
 
       utterance.lang = "id-ID";
       utterance.rate = 1.0;
@@ -200,8 +212,7 @@
       utterance.volume = 1.0;
 
       utterance.onstart = () => {
-        status.textContent =
-          "🔊 VoxAgent is speaking...";
+        status.textContent = "🔊 VoxAgent is speaking...";
       };
 
       utterance.onend = () => {
@@ -209,65 +220,42 @@
       };
 
       utterance.onerror = (event) => {
-        console.error(
-          "Speech synthesis error:",
-          event
-        );
-
-        status.textContent =
-          "⚠️ Voice output failed";
+        console.error("Speech synthesis error:", event);
+        status.textContent = "⚠️ Voice output failed";
       };
 
-      window.speechSynthesis.speak(
-        utterance
-      );
+      window.speechSynthesis.speak(utterance);
     }
 
     async function createSession() {
-      status.textContent =
-        "Creating VoxAgent session...";
+      status.textContent = "Creating VoxAgent session...";
 
       try {
-        const response = await fetch(
-          "/api/agent/session",
-          {
-            method: "POST"
-          }
-        );
+        const response = await fetch("/api/agent/session", {
+          method: "POST"
+        });
 
         if (!response.ok) {
-          throw new Error(
-            `HTTP ${response.status}`
-          );
+          throw new Error(`HTTP ${response.status}`);
         }
 
-        const data =
-          await response.json();
+        const data = await response.json();
 
         if (!data.conversationId) {
-          throw new Error(
-            "No conversationId returned"
-          );
+          throw new Error("No conversationId returned");
         }
 
-        conversationId =
-          data.conversationId;
+        conversationId = data.conversationId;
 
         sessionInfo.textContent =
           `Session: ${conversationId}`;
 
         status.textContent = "Ready";
 
-        console.log(
-          "VoxAgent session:",
-          conversationId
-        );
+        console.log("VoxAgent session:", conversationId);
 
       } catch (error) {
-        console.error(
-          "Failed to create session:",
-          error
-        );
+        console.error("Failed to create session:", error);
 
         status.textContent =
           "❌ Failed to initialize VoxAgent";
@@ -283,65 +271,121 @@
       }
 
       if (!conversationId) {
-        throw new Error(
-          "No active conversation session"
-        );
+        throw new Error("No active conversation session");
       }
 
-      status.textContent =
-        "🧠 VoxAgent is thinking...";
+      status.textContent = "🧠 VoxAgent is thinking...";
 
       try {
-        const response = await fetch(
-          "/api/agent/chat",
-          {
-            method: "POST",
-
-            headers: {
-              "Content-Type":
-                "application/json"
-            },
-
-            body: JSON.stringify({
-              message,
-              conversationId
-            })
-          }
-        );
+        const response = await fetch("/api/agent/chat", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            message,
+            conversationId
+          })
+        });
 
         if (!response.ok) {
-          throw new Error(
-            `HTTP ${response.status}`
-          );
+          throw new Error(`HTTP ${response.status}`);
         }
 
-        const data =
-          await response.json();
+        const data = await response.json();
 
         if (!data.response) {
-          throw new Error(
-            "Agent returned no response"
-          );
+          throw new Error("Agent returned no response");
         }
 
-        addMessage(
-          "assistant",
-          data.response
-        );
-
+        addMessage("assistant", data.response);
         speak(data.response);
 
-        status.textContent =
-          "Ready";
-
       } catch (error) {
-        console.error(
-          "Agent request failed:",
-          error
-        );
+        console.error("Agent request failed:", error);
 
         status.textContent =
           "❌ Failed to contact VoxAgent";
+      }
+    }
+
+    function clearSilenceTimer() {
+      if (silenceTimer) {
+        clearTimeout(silenceTimer);
+        silenceTimer = null;
+      }
+    }
+
+    function scheduleEndOfTurn() {
+      clearSilenceTimer();
+
+      silenceTimer = setTimeout(() => {
+        finishUserTurn();
+      }, SILENCE_DELAY);
+    }
+
+    async function finishUserTurn() {
+      clearSilenceTimer();
+
+      if (turnProcessing) {
+        return;
+      }
+
+      const finalText = transcriptBuffer.trim();
+
+      if (!finalText) {
+        return;
+      }
+
+      turnProcessing = true;
+
+      // Stop recognition after the turn has been assembled.
+      if (recognition) {
+        try {
+          recognition.stop();
+        } catch (error) {
+          console.warn("Recognition stop:", error);
+        }
+      }
+
+      // Remove any interim-only UI.
+      removeInterimMessage();
+
+      // Show exactly one final user message.
+      addMessage("user", finalText);
+
+      // Reset buffer before sending.
+      transcriptBuffer = "";
+      interimText = "";
+
+      await askAgent(finalText);
+
+      turnProcessing = false;
+    }
+
+    let interimElement = null;
+
+    function showInterim(text) {
+      if (!text) {
+        removeInterimMessage();
+        return;
+      }
+
+      if (!interimElement) {
+        interimElement = addMessage(
+          "user",
+          text,
+          "interim"
+        );
+      } else {
+        interimElement.textContent = `You: ${text}`;
+      }
+    }
+
+    function removeInterimMessage() {
+      if (interimElement) {
+        interimElement.remove();
+        interimElement = null;
       }
     }
 
@@ -351,45 +395,71 @@
           "❌ Speech recognition is not supported by this browser.";
 
         talkBtn.disabled = true;
-
         return;
       }
 
-      recognition =
-        new SpeechRecognition();
+      recognition = new SpeechRecognition();
 
       recognition.lang = "id-ID";
 
-      recognition.continuous = false;
+      // Keep recognizing multiple chunks.
+      recognition.continuous = true;
 
-      recognition.interimResults = false;
+      // Receive interim speech while user is still talking.
+      recognition.interimResults = true;
 
       recognition.maxAlternatives = 1;
 
       recognition.onstart = () => {
-        status.textContent =
-          "🎤 Listening...";
+        status.textContent = "🎤 Listening...";
 
         talkBtn.disabled = true;
         stopBtn.disabled = false;
+
+        turnProcessing = false;
+        transcriptBuffer = "";
+        interimText = "";
+
+        removeInterimMessage();
       };
 
-      recognition.onresult = async (event) => {
-        const transcript =
-          event.results[0][0].transcript.trim();
+      recognition.onresult = (event) => {
+        let newFinalText = "";
+        let newInterimText = "";
 
-        if (!transcript) {
-          return;
+        for (
+          let i = event.resultIndex;
+          i < event.results.length;
+          i++
+        ) {
+          const result = event.results[i];
+
+          const text =
+            result[0].transcript.trim();
+
+          if (result.isFinal) {
+            newFinalText += text + " ";
+          } else {
+            newInterimText += text + " ";
+          }
         }
 
-        addMessage(
-          "user",
-          transcript
-        );
+        if (newFinalText) {
+          transcriptBuffer += newFinalText;
+        }
 
-        await askAgent(
-          transcript
-        );
+        interimText = newInterimText.trim();
+
+        const preview =
+          `${transcriptBuffer} ${interimText}`.trim();
+
+        if (preview) {
+          showInterim(preview);
+        }
+
+        // Every recognized chunk resets the silence timer.
+        // This is what allows the user to speak for longer.
+        scheduleEndOfTurn();
       };
 
       recognition.onerror = (event) => {
@@ -397,6 +467,12 @@
           "Speech recognition error:",
           event.error
         );
+
+        if (event.error === "no-speech") {
+          status.textContent =
+            "🎤 Waiting for speech...";
+          return;
+        }
 
         status.textContent =
           `❌ Voice error: ${event.error}`;
@@ -406,75 +482,87 @@
         talkBtn.disabled = false;
         stopBtn.disabled = true;
 
+        // Chrome can stop recognition even with continuous=true.
+        // If there is still an unfinished turn, give it a moment.
         if (
-          status.textContent ===
-          "🎤 Listening..."
+          transcriptBuffer.trim() &&
+          !turnProcessing
         ) {
-          status.textContent =
-            "Ready";
+          scheduleEndOfTurn();
+        } else if (!turnProcessing) {
+          status.textContent = "Ready";
         }
       };
     }
 
-    talkBtn.addEventListener(
-      "click",
-      () => {
-        if (!recognition) {
-          return;
-        }
+    talkBtn.addEventListener("click", () => {
+      if (!recognition) {
+        return;
+      }
 
+      // Barge-in: interrupt AI speech immediately.
+      stopSpeaking();
+
+      // Start a fresh user turn.
+      transcriptBuffer = "";
+      interimText = "";
+      turnProcessing = false;
+
+      removeInterimMessage();
+      clearSilenceTimer();
+
+      try {
+        recognition.start();
+      } catch (error) {
+        console.error(
+          "Recognition start failed:",
+          error
+        );
+      }
+    });
+
+    stopBtn.addEventListener("click", () => {
+      if (recognition) {
         try {
-          recognition.start();
+          recognition.stop();
         } catch (error) {
-          console.error(
-            "Recognition start failed:",
-            error
-          );
+          console.warn("Recognition stop:", error);
         }
       }
-    );
 
-    stopBtn.addEventListener(
-      "click",
-      () => {
-        if (!recognition) {
-          return;
-        }
+      // Treat explicit Stop as end of turn.
+      finishUserTurn();
+    });
 
-        recognition.stop();
-      }
-    );
+    clearBtn.addEventListener("click", () => {
+      chat.innerHTML = "";
 
-    clearBtn.addEventListener(
-      "click",
-      () => {
-        chat.innerHTML = "";
+      stopSpeaking();
+      clearSilenceTimer();
 
-        if (
-          "speechSynthesis" in window
-        ) {
-          window.speechSynthesis.cancel();
-        }
+      transcriptBuffer = "";
+      interimText = "";
+      turnProcessing = false;
 
-        status.textContent =
-          "Ready";
-      }
-    );
+      interimElement = null;
 
-    newSessionBtn.addEventListener(
-      "click",
-      async () => {
-        chat.innerHTML = "";
+      status.textContent = "Ready";
+    });
 
-        if (
-          "speechSynthesis" in window
-        ) {
-          window.speechSynthesis.cancel();
-        }
+    newSessionBtn.addEventListener("click", async () => {
+      chat.innerHTML = "";
 
-        await createSession();
-      }
-    );
+      stopSpeaking();
+      clearSilenceTimer();
+
+      transcriptBuffer = "";
+      interimText = "";
+      turnProcessing = false;
+
+      interimElement = null;
+
+      await createSession();
+    });
 
     createSession();
     setupRecognition();

@@ -25,24 +25,75 @@ export interface ChatMessage {
 const SYSTEM_PROMPT = `
 You are VoxAgent, a professional AI voice call agent.
 
-You are given the conversation history from your application database.
-That history is real conversation context and must be treated as authoritative.
+You communicate with users through speech, so your responses must sound
+natural when spoken aloud.
 
-Rules:
-- Use the provided conversation history when answering questions about previous messages.
-- If the user already provided information in the conversation history, use it directly.
-- Never claim that you do not remember the conversation when the information exists in the provided history.
-- Never contradict information contained in the conversation history.
-- Never invent facts.
-- Keep responses natural, concise, and suitable for spoken conversation.
-- Ask for clarification when required information is genuinely missing.
+CORE BEHAVIOR:
 
-Calendar rules:
-- Tool results are the source of truth.
-- Never change, reinterpret, or invent dates, times, titles, or durations returned by tools.
-- When reporting calendar events, preserve the exact data returned by the tool.
+1. Understand the user's actual intent, not just the literal wording.
+2. Conversation history from the database is real context and should be
+   used as authoritative context.
+3. The user's speech transcript may contain speech-recognition errors.
+4. If a transcript contains an obvious transcription mistake, infer the
+   intended meaning from context when the intended meaning is reasonably clear.
+5. Do not assume strange or nonsensical transcript text is literally true.
+6. If the meaning is genuinely ambiguous, ask a short clarification question.
+7. Never invent facts.
+8. Never claim an action happened unless the appropriate tool actually
+   succeeded.
+9. When a tool returns data, that tool result is the source of truth.
+10. Never alter dates, times, titles, identifiers, or durations returned
+    by tools.
 
-You are an AI assistant. Do not pretend to be human.
+VOICE STYLE:
+
+- Speak naturally.
+- Prefer short sentences.
+- Avoid unnecessary bullet lists when speaking.
+- Avoid long introductions.
+- Do not repeat the user's whole question.
+- Answer the core question first.
+- Ask at most one clarification question at a time.
+- Match the user's language whenever practical.
+- If the user speaks Indonesian, normally answer Indonesian.
+- If the user speaks English, normally answer English.
+
+CONVERSATIONAL MEMORY:
+
+- Use the supplied conversation history.
+- Never say you do not remember something when the information exists
+  in the supplied conversation history.
+- If the user tells you their name, remember it within that conversation.
+- Use previous context naturally instead of repeatedly asking for information
+  that the user already supplied.
+
+ASR / SPEECH RECOGNITION:
+
+Voice transcription can be imperfect.
+
+For example, names, slang, mixed Indonesian-English speech, or uncommon words
+may be transcribed incorrectly.
+
+When a transcript looks slightly wrong but the intended meaning is clear,
+silently interpret it correctly.
+
+When two interpretations are plausible and the difference matters,
+ask for clarification instead of guessing.
+
+Do not lecture the user about speech recognition unless they ask about it.
+
+CALENDAR:
+
+You can:
+- book calendar events
+- list calendar events
+
+For calendar operations:
+- Use tools instead of pretending.
+- Tool results are authoritative.
+- Preserve exact dates and times from tool results.
+- If the user asks to book something and required information is missing,
+  ask for the missing information.
 `;
 
 const tools = [
@@ -50,8 +101,7 @@ const tools = [
     type: "function" as const,
     function: {
       name: "book_event",
-      description:
-        "Book a calendar event for the user.",
+      description: "Book a calendar event for the user.",
       parameters: {
         type: "object",
         properties: {
@@ -61,18 +111,15 @@ const tools = [
           },
           date: {
             type: "string",
-            description:
-              "Date of the event in YYYY-MM-DD format."
+            description: "Date in YYYY-MM-DD format."
           },
           time: {
             type: "string",
-            description:
-              "Start time in HH:MM 24-hour format."
+            description: "Start time in HH:MM 24-hour format."
           },
           durationMinutes: {
             type: "number",
-            description:
-              "Duration of the event in minutes."
+            description: "Duration in minutes."
           }
         },
         required: [
@@ -87,8 +134,7 @@ const tools = [
     type: "function" as const,
     function: {
       name: "get_events",
-      description:
-        "Get all currently booked calendar events.",
+      description: "Get all currently booked calendar events.",
       parameters: {
         type: "object",
         properties: {}
@@ -118,7 +164,6 @@ async function executeTool(
   }
 }
 
-
 export async function generateAIResponse(
   history: ChatMessage[],
   message: string
@@ -128,10 +173,12 @@ export async function generateAIResponse(
       role: "system",
       content: SYSTEM_PROMPT
     },
+
     ...history.map((item) => ({
       role: item.role,
       content: item.content
     })),
+
     {
       role: "user",
       content: message
@@ -145,8 +192,8 @@ export async function generateAIResponse(
         messages,
         tools,
         tool_choice: "auto",
-        temperature: 0.3,
-        max_tokens: 400
+        temperature: 0.2,
+        max_tokens: 350
       });
 
     const assistantMessage =
@@ -164,7 +211,7 @@ export async function generateAIResponse(
     ) {
       return (
         assistantMessage.content?.trim() ||
-        "I'm sorry, I couldn't generate a response."
+        "Maaf, saya belum bisa memberikan jawaban."
       );
     }
 
@@ -179,7 +226,8 @@ export async function generateAIResponse(
         continue;
       }
 
-      const toolName = toolCall.function.name;
+      const toolName =
+        toolCall.function.name;
 
       let args: Record<string, unknown>;
 
