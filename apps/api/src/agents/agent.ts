@@ -11,24 +11,19 @@ export interface AgentMessage {
 }
 
 export class VoxAgent {
-  private name: string;
-  private conversationId: string | null = null;
-
-  constructor(name = "VoxAgent") {
-    this.name = name;
-  }
-
   async startConversation(): Promise<string> {
-    this.conversationId = await createConversation();
-    return this.conversationId;
+    return createConversation();
   }
 
-  async chat(message: string): Promise<string> {
-    if (!this.conversationId) {
-      await this.startConversation();
+  async chat(
+    conversationId: string,
+    message: string
+  ): Promise<string> {
+    if (!conversationId) {
+      throw new Error("conversationId is required");
     }
 
-    const history = await getMessages(this.conversationId!);
+    const history = await getMessages(conversationId);
 
     const response = await generateAIResponse(
       history,
@@ -36,13 +31,13 @@ export class VoxAgent {
     );
 
     await saveMessage(
-      this.conversationId!,
+      conversationId,
       "user",
       message
     );
 
     await saveMessage(
-      this.conversationId!,
+      conversationId,
       "assistant",
       response
     );
@@ -50,15 +45,13 @@ export class VoxAgent {
     return response;
   }
 
-  getConversationId(): string | null {
-    return this.conversationId;
-  }
-
-  async getHistory(): Promise<AgentMessage[]> {
-    if (!this.conversationId) {
+  async getHistory(
+    conversationId: string
+  ): Promise<AgentMessage[]> {
+    if (!conversationId) {
       return [];
     }
 
-    return getMessages(this.conversationId);
+    return getMessages(conversationId);
   }
 }
